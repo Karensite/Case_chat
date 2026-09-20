@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Chat Case</title>
+<style>
+    body {
+        margin:0;
+        font-family:sans-serif;
+        background:#050505;
+        color:#fff;
+        overflow:hidden;
+    }
+    .bg-anim {
+        position:fixed;
+        inset:0;
+        background:
+          radial-gradient(circle at 0% 0%, #0ff, transparent 60%),
+          radial-gradient(circle at 100% 100%, #f0f, transparent 60%),
+          radial-gradient(circle at 0% 100%, #ff0, transparent 60%);
+        filter:blur(40px);
+        opacity:0.35;
+        animation:moveBg 20s linear infinite;
+        z-index:-1;
+    }
+    @keyframes moveBg {
+        0% {transform:translate(0,0);}
+        50% {transform:translate(-40px,20px);}
+        100% {transform:translate(0,0);}
+    }
+    .container {
+        display:flex;
+        flex-direction:column;
+        height:100vh;
+        backdrop-filter:blur(10px);
+        background:rgba(0,0,0,0.7);
+    }
+    header {
+        padding:10px 15px;
+        border-bottom:1px solid #333;
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+    }
+    header h1 {
+        margin:0;
+        font-size:18px;
+        letter-spacing:1px;
+    }
+    header span {
+        font-size:11px;
+        color:#aaa;
+    }
+    #auth, #chat-ui {
+        padding:10px 15px;
+        flex:1;
+        display:none;
+        flex-direction:column;
+    }
+    #auth.active, #chat-ui.active {
+        display:flex;
+    }
+    input, button {
+        background:#111;
+        color:#fff;
+        border:1px solid #333;
+        border-radius:6px;
+        padding:8px;
+        margin:4px 0;
+        font-size:13px;
+    }
+    button {
+        cursor:pointer;
+        background:#0f0;
+        border-color:#0f0;
+        color:#000;
+        font-weight:bold;
+    }
+    button.secondary {
+        background:#222;
+        border-color:#555;
+        color:#fff;
+    }
+    #chat-box {
+        flex:1;
+        overflow-y:auto;
+        padding:5px 0;
+    }
+    .msg {
+        margin:4px 0;
+        padding:8px;
+        border-radius:8px;
+        max-width:80%;
+        position:relative;
+        font-size:13px;
+        word-wrap:break-word;
+    }
+    .msg.me {
+        background:#0f0;
+        color:#000;
+        margin-left:auto;
+    }
+    .msg.other {
+        background:#222;
+        color:#fff;
+        margin-right:auto;
+    }
+    .msg small {
+        display:block;
+        font-size:10px;
+        opacity:0.6;
+        margin-top:4px;
+    }
+    .msg .del-hint {
+        position:absolute;
+        top:2px;
+        right:6px;
+        font-size:9px;
+        opacity:0.5;
+    }
+    #input-row {
+        display:flex;
+        gap:5px;
+        padding:8px 0;
+        border-top:1px solid #333;
+    }
+    #input-row input {
+        flex:1;
+    }
+    #status-bar {
+        font-size:11px;
+        color:#aaa;
+        margin-top:4px;
+    }
+    #memory {
+        font-size:11px;
+        color:#0f0;
+    }
+    .row {
+        display:flex;
+        gap:5px;
+    }
+</style>
+</head>
+<body>
+
+<div class="bg-anim"></div>
+
+<div class="container">
+    <header>
+        <div>
+            <h1>Chat Case</h1>
+            <span>چت خصوصی با نام کاربری</span>
+        </div>
+        <div id="memory">Memory: N/A</div>
+    </header>
+
+    <!-- ثبت‌نام / ورود -->
+    <div id="auth" class="active">
+        <h3>ثبت‌نام / ورود</h3>
+        <input id="username" placeholder="نام کاربری">
+        <input id="password" type="password" placeholder="رمز عبور">
+        <div class="row">
+            <button onclick="register()">ثبت‌نام</button>
+            <button class="secondary" onclick="login()">ورود</button>
+        </div>
+        <div id="auth-status"></div>
+    </div>
+
+    <!-- چت خصوصی -->
+    <div id="chat-ui">
+        <div class="row">
+            <input id="targetUser" placeholder="نام کاربری طرف مقابل">
+            <button class="secondary" onclick="loadChat()">باز کردن چت</button>
+        </div>
+        <div id="status-bar"></div>
+        <div id="chat-box"></div>
+        <div id="input-row">
+            <input id="msgInput" placeholder="پیام... (برای حذف، روی پیام نگه دار)">
+            <button onclick="sendMsg()">ارسال</button>
+        </div>
+        <button class="secondary" onclick="reportUser()">گزارش این کاربر</button>
+        <button class="secondary" onclick="logout()">خروج</button>
+    </div>
+</div>
+
+<script>
+// تنظیمات Supabase
+const SUPABASE_URL = "https://lzlubkybrzkomjefqwxk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_4OjzHXmUxV9G6LhIW3vwTg_30K5wRsV";
+
+// وضعیت کاربر
+let currentUser = null;
+let currentTarget = null;
+
+// نمایش حافظه (JSON-style info)
+function updateMemory() {
+    try {
+        if (performance && performance.memory) {
+            const used = performance.memory.usedJSHeapSize / (1024*1024);
+            const total = performance.memory.jsHeapSizeLimit / (1024*1024);
+            const info = {
+                usedMB: used.toFixed(1),
+                limitMB: total.toFixed(1)
+            };
+            document.getElementById("memory").textContent =
+                "Memory: " + JSON.stringify(info);
+        }
+    } catch(e) {
+        document.getElementById("memory").textContent = "Memory: N/A";
+    }
+}
+setInterval(updateMemory, 2000);
+updateMemory();
+
+// کمک‌تابع‌های REST (JSON + JS)
+async function sbSelect(table, filter = "") {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`, {
+        headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`
+        }
+    });
+    return await res.json();
+}
+
+async function sbInsert(table, data) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`
+        },
+        body: JSON.stringify(data)
+    });
+    return await res.json();
+}
+
+async function sbDelete(table, filter) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`, {
+        method: "DELETE",
+        headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`
+        }
+    });
+    return await res.text();
+}
+
+// ثبت‌نام
+async function register() {
+    const u = document.getElementById("username").value.trim();
+    const p = document.getElementById("password").value.trim();
+    const status = document.getElementById("auth-status");
+    if (!u || !p) {
+        status.textContent = "نام کاربری و رمز را وارد کن.";
+        return;
+    }
+    const exists = await sbSelect("users", `username=eq.${encodeURIComponent(u)}`);
+    if (exists.length > 0) {
+        status.textContent = "این نام کاربری قبلاً ثبت شده.";
+        return;
+    }
+    await sbInsert("users", {
+        username: u,
+        password: p,
+        blocked: false
+    });
+    status.textContent = "ثبت‌نام شد. حالا می‌تونی وارد شوی.";
+}
+
+// ورود
+async function login() {
+    const u = document.getElementById("username").value.trim();
+    const p = document.getElementById("password").value.trim();
+    const status = document.getElementById("auth-status");
+    if (!u || !p) {
+        status.textContent = "نام کاربری و رمز را وارد کن.";
+        return;
+    }
+    const rows = await sbSelect("users",
+        `username=eq.${encodeURIComponent(u)}&password=eq.${encodeURIComponent(p)}`
+    );
+    if (rows.length === 0) {
+        status.textContent = "نام کاربری یا رمز اشتباه است.";
+        return;
+    }
+    if (rows[0].blocked) {
+        status.textContent = "این حساب مسدود شده است.";
+        return;
+    }
+    currentUser = u;
+    localStorage.setItem("chatcase_user", u);
+    status.textContent = "";
+    document.getElementById("auth").classList.remove("active");
+    document.getElementById("chat-ui").classList.add("active");
+    document.getElementById("status-bar").textContent = "وارد شدی به عنوان: " + currentUser;
+    loadChat();
+}
+
+// خروج
+function logout() {
+    currentUser = null;
+    localStorage.removeItem("chatcase_user");
+    document.getElementById("chat-ui").classList.remove("active");
+    document.getElementById("auth").classList.add("active");
+}
+
+// بازیابی کاربر
+(function restoreUser(){
+    const u = localStorage.getItem("chatcase_user");
+    if (u) {
+        currentUser = u;
+        document.getElementById("auth").classList.remove("active");
+        document.getElementById("chat-ui").classList.add("active");
+        document.getElementById("status-bar").textContent = "وارد شدی به عنوان: " + currentUser;
+    }
+})();
+
+// بارگذاری چت بین دو کاربر
+async function loadChat() {
+    if (!currentUser) return;
+    const target = document.getElementById("targetUser").value.trim();
+    if (!target) {
+        document.getElementById("status-bar").textContent = "نام کاربری طرف مقابل را وارد کن.";
+        return;
+    }
+    currentTarget = target;
+    document.getElementById("status-bar").textContent =
+        "چت بین " + currentUser + " و " + currentTarget;
+
+    const all = await sbSelect("messages",
+        `or=(from_user.eq.${encodeURIComponent(currentUser)},to_user.eq.${encodeURIComponent(currentUser)})`
+    );
+    const msgs = all.filter(m =>
+        (m.from_user === currentUser && m.to_user === currentTarget) ||
+        (m.from_user === currentTarget && m.to_user === currentUser)
+    ).sort((a,b)=>a.time - b.time);
+
+    const box = document.getElementById("chat-box");
+    box.innerHTML = "";
+    msgs.forEach(m => {
+        const div = document.createElement("div");
+        div.className = "msg " + (m.from_user === currentUser ? "me" : "other");
+        div.textContent = m.text;
+        const small = document.createElement("small");
+        small.textContent = new Date(m.time).toLocaleString();
+        div.appendChild(small);
+        const hint = document.createElement("span");
+        hint.className = "del-hint";
+        hint.textContent = "حذف؟ نگه دار";
+        div.appendChild(hint);
+
+        // حذف با نگه داشتن
+        const tryDelete = async () => {
+            if (m.from_user === currentUser) {
+                if (confirm("این پیام حذف شود؟")) {
+                    await sbDelete("messages", `id=eq.${m.id}`);
+                    loadChat();
+                }
+            }
+        };
+        div.addEventListener("touchstart", e => {
+            div.dataset.touchStart = Date.now();
+        });
+        div.addEventListener("touchend", async e => {
+            const t = Date.now() - (div.dataset.touchStart || 0);
+            if (t > 500) await tryDelete();
+        });
+        div.addEventListener("mousedown", e => {
+            div.dataset.mouseDown = Date.now();
+        });
+        div.addEventListener("mouseup", async e => {
+            const t = Date.now() - (div.dataset.mouseDown || 0);
+            if (t > 500) await tryDelete();
+        });
+
+        box.appendChild(div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+
+// ارسال پیام
+async function sendMsg() {
+    if (!currentUser || !currentTarget) return;
+    const text = document.getElementById("msgInput").value.trim();
+    if (!text) return;
+    await sbInsert("messages", {
+        from_user: currentUser,
+        to_user: currentTarget,
+        text: text,
+        time: Date.now()
+    });
+    document.getElementById("msgInput").value = "";
+    loadChat();
+}
+
+// گزارش کاربر
+async function reportUser() {
+    if (!currentUser || !currentTarget) return;
+    const reason = prompt("دلیل گزارش این کاربر چیست؟");
+    if (!reason) return;
+    await sbInsert("reports", {
+        reporter: currentUser,
+        target: currentTarget,
+        reason: reason,
+        time: Date.now()
+    });
+    alert("گزارش ثبت شد و به مدیر ارسال می‌شود.");
+}
+</script>
+
+</body>
+  </html>
