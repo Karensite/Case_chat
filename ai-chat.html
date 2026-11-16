@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="رابط آموزشی فارسی Case برای مدل کوچک خودساخته">
+  <title>Case | گفت‌وگوی آموزشی</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10131a; color: #eef2ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+    main { width: min(100%, 680px); background: #1b2030; border: 1px solid #343c52; border-radius: 18px; padding: 1.25rem; box-shadow: 0 16px 50px #0006; }
+    h1 { margin-top: 0; font-size: 1.5rem; }
+    .note { color: #c5cbe0; line-height: 1.8; font-size: .92rem; }
+    label { display: block; margin: .8rem 0 .35rem; }
+    input, textarea, button { font: inherit; border-radius: 9px; padding: .75rem; }
+    input, textarea { width: 100%; color: #fff; background: #111522; border: 1px solid #48516b; }
+    textarea { min-height: 90px; resize: vertical; }
+    button { border: 0; background: #8dd9b5; color: #10251c; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .row { display: flex; gap: .6rem; align-items: center; }
+    .row input { flex: 1; }
+    #status { min-height: 1.8rem; margin: .75rem 0; color: #b6c4df; }
+    #status[data-kind="error"] { color: #ff9a9a; }
+    #status[data-kind="ok"] { color: #8dd9b5; }
+    #messages { display: grid; gap: .6rem; max-height: 44vh; overflow-y: auto; margin: 1rem 0; }
+    .message { white-space: pre-wrap; overflow-wrap: anywhere; padding: .75rem; border-radius: 10px; line-height: 1.8; }
+    .user { background: #293650; }
+    .assistant { background: #202b28; }
+    .caption { opacity: .72; font-size: .82rem; margin-bottom: .2rem; }
+    form { display: grid; gap: .5rem; }
+    @media (max-width: 480px) { main { padding: .9rem; } .row { align-items: stretch; flex-direction: column; } .row button { width: 100%; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>گفت‌وگوی آموزشی Case</h1>
+  <p class="note">این رابط به سرور مدل کوچک آموزشی وصل می‌شود. سرور را خودتان اجرا کنید و نشانی آن را وارد کنید؛ هیچ نشانی زنده‌ای از پیش تنظیم نشده است. این مدل درک معنایی ندارد و ممکن است پاسخ نامربوط بدهد.</p>
+  <label for="server-url">آدرس پایهٔ سرور</label>
+  <div class="row">
+    <input id="server-url" type="url" inputmode="url" placeholder="مثال محلی: http://localhost:8000" autocomplete="url">
+    <button id="save-server" type="button">ذخیره و بررسی اتصال</button>
+  </div>
+  <div id="status" role="status" aria-live="polite">آدرس سرور تنظیم نشده است.</div>
+  <section id="messages" aria-label="گفت‌وگو"></section>
+  <form id="chat-form">
+    <label for="message">پیام شما</label>
+    <textarea id="message" maxlength="2000" required placeholder="پیام را بنویسید"></textarea>
+    <button id="send" type="submit">ارسال پیام</button>
+  </form>
+</main>
+<script>
+(() => {
+  const urlInput = document.querySelector('#server-url');
+  const status = document.querySelector('#status');
+  const messages = document.querySelector('#messages');
+  const form = document.querySelector('#chat-form');
+  const messageInput = document.querySelector('#message');
+  const sendButton = document.querySelector('#send');
+  const saveButton = document.querySelector('#save-server');
+  const STORAGE_KEY = 'case.ai.serverUrl';
+
+  function setStatus(text, kind = '') {
+    status.textContent = text;
+    status.dataset.kind = kind;
+  }
+  function baseUrl() {
+    const value = urlInput.value.trim();
+    if (!value) throw new Error('ابتدا آدرس سرور را وارد کنید.');
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('فقط نشانی http یا https پذیرفته می‌شود.');
+    return parsed.href.replace(/\/+$/, '');
+  }
+  function addMessage(role, text) {
+    const wrapper = document.createElement('article');
+    wrapper.className = `message ${role}`;
+    const caption = document.createElement('div');
+    caption.className = 'caption';
+    caption.textContent = role === 'user' ? 'شما' : 'مدل آموزشی';
+    const content = document.createElement('div');
+    content.textContent = text;
+    wrapper.append(caption, content);
+    messages.append(wrapper);
+    messages.scrollTop = messages.scrollHeight;
+  }
+  async function checkConnection() {
+    const url = baseUrl();
+    localStorage.setItem(STORAGE_KEY, url);
+    setStatus('در حال بررسی اتصال…');
+    try {
+      const response = await fetch(`${url}/health`, { method: 'GET' });
+      if (!response.ok) throw new Error('سرور پاسخ موفق نداد.');
+      const data = await response.json();
+      setStatus(data.model_loaded ? 'اتصال برقرار است؛ مدل بارگذاری شده.' : 'سرور در دسترس است، اما مدل آموزش‌دیده بارگذاری نشده است.', data.model_loaded ? 'ok' : 'error');
+    } catch (error) {
+      setStatus(error instanceof TypeError ? 'اتصال برقرار نشد؛ آدرس، اجرای سرور و تنظیم CORS را بررسی کنید.' : error.message, 'error');
+    }
+  }
+  saveButton.addEventListener('click', () => {
+    try { void checkConnection(); } catch (error) { setStatus(error.message, 'error'); }
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const text = messageInput.value.trim();
+    if (!text) { setStatus('پیام خالی است.', 'error'); return; }
+    let url;
+    try { url = baseUrl(); } catch (error) { setStatus(error.message, 'error'); return; }
+    addMessage('user', text);
+    messageInput.value = '';
+    sendButton.disabled = true;
+    setStatus('در حال دریافت پاسخ…');
+    try {
+      const response = await fetch(`${url}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      });
+      let data;
+      try { data = await response.json(); } catch { throw new Error('پاسخ سرور JSON معتبر نبود.'); }
+      if (!response.ok) throw new Error(data.error || `خطای سرور (${response.status}).`);
+      if (typeof data.response !== 'string') throw new Error('ساختار پاسخ سرور معتبر نیست.');
+      addMessage('assistant', data.response);
+      setStatus('پاسخ دریافت شد.', 'ok');
+    } catch (error) {
+      setStatus(error instanceof TypeError ? 'اتصال برقرار نشد؛ سرور و CORS را بررسی کنید.' : error.message, 'error');
+    } finally {
+      sendButton.disabled = false;
+      messageInput.focus();
+    }
+  });
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) urlInput.value = saved;
+})();
+</script>
+</body>
+</html>
